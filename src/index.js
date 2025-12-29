@@ -240,21 +240,19 @@ const DEV_MODE = false; // set to true to enable terminal logging
     }
   });
 
-  // Share button: Posts a title hyperlink embed to the channel.
+  // Share button: Posts the full current embed to the channel.
   client.on('interactionCreate', async (interaction) => {
     try {
       if (!interaction.isButton?.()) return;
       if (interaction.customId !== 'fg-share') return;
       const msg = interaction.message;
       const srcEmbed = msg?.embeds?.[0];
-      const title = srcEmbed?.title || 'Field Guide';
-      const url = srcEmbed?.url;
-      if (!url) {
-        try { return await interaction.reply({ content: 'No URL to share.', flags: 64 }); } catch {}
+      if (!srcEmbed) {
+        try { return await interaction.reply({ content: 'No embed to share.', flags: 64 }); } catch {}
         return;
       }
-      const shared = new EmbedBuilder().setTitle(title).setURL(url).setColor(0x3AA3FF);
-      await interaction.channel.send({ embeds: [shared] });
+      // Share the full embed content currently displayed to the user
+      await interaction.channel.send({ embeds: [srcEmbed] });
       try { await interaction.reply({ content: 'Shared link to channel.', flags: 64 }); } catch {}
     } catch (e) {
       DEV_MODE && console.error('[FieldGuideBot] fg-share error:', e);
