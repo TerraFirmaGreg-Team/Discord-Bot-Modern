@@ -5,6 +5,8 @@
 
   const BASE = 'https://terrafirmagreg-team.github.io/Field-Guide-Modern/en_us/';
   const EMBED_DESC_LIMIT = 4096;
+  // Lines starting with these labels are considered metadata and excluded from embeds.
+  const STAT_PREFIX_RE = /^(Recipe:|Multiblock:)/i;
 
   // Fragments containing these substrings will be ignored.
   const FRAGMENT_BLACKLIST_SUBSTRINGS = [
@@ -58,10 +60,45 @@
   function getListText($, listEl, ordered) {
     const lines = [];
     $(listEl).children('li').each((i, li) => {
-      const t = $(li).text().trim();
-      if (t) lines.push(`${ordered ? `${i + 1}.` : '-' } ${t}`);
+      const t = getInlineMarkdown($, $(li));
+      const clean = (t || '').trim();
+      if (clean) lines.push(`${ordered ? `${i + 1}.` : '-' } ${clean}`);
     });
     return lines.join('\n');
+  };
+
+  /**
+   * Converts element children to inline Discord markdown.
+   * @param {import('cheerio').CheerioAPI} $
+   * @param {import('cheerio').Cheerio<import('cheerio').Element>} el
+   * @returns {string}
+   */
+  function getInlineMarkdown($, el) {
+    let out = '';
+    const children = el.contents();
+    children.each((_, child) => {
+      if (child.type === 'text') {
+        out += String(child.data || '');
+        return;
+      };
+      if (child.type === 'tag') {
+        const tag = (child.name || '').toLowerCase();
+        const $c = $(child);
+        if (tag === 'br') { out += '\n'; return; }
+        if (tag === 'strong' || tag === 'b') { const inner = getInlineMarkdown($, $c); out += inner ? `**${inner}**` : ''; return; };
+        if (tag === 'em' || tag === 'i') { const inner = getInlineMarkdown($, $c); out += inner ? `*${inner}*` : ''; return; };
+        if (tag === 'code' || tag === 'kbd') { const inner = getInlineMarkdown($, $c).replace(/`/g, '\u200B`'); out += inner ? `\`${inner}\`` : ''; return; };
+        if (tag === 'a') {
+          const href = $c.attr('href') || '';
+          const text = getInlineMarkdown($, $c) || href;
+          try { const abs = href ? new URL(href, BASE).toString() : ''; out += abs ? `[${text}](${abs})` : text; }
+          catch { out += text; }
+          return;
+        };
+        out += getInlineMarkdown($, $c);
+      };
+    });
+    return out;
   };
 
   /**
@@ -82,6 +119,23 @@
   };
 
   /**
+   * Returns true if the element is inside any of the given selectors.
+   * Useful for excluding UI/recipe containers from text extraction.
+   * @param {import('cheerio').CheerioAPI} $ - Cheerio instance.
+   * @param {import('cheerio').Cheerio<import('cheerio').Element>} el - Element to test.
+   * @param {string} selector - CSS selectors.
+   * @returns {boolean}
+   */
+  function isWithin($, el, selector) {
+    try {
+      const c = $(el).closest(selector);
+      return !!(c && c.length);
+    } catch {
+      return false;
+    };
+  };
+
+  /**
    * Determines if an element should be included in text.
    * @param {import('cheerio').CheerioAPI} $ - Cheerio instance.
    * @param {import('cheerio').Cheerio<import('cheerio').Element>} el - Element to check.
@@ -91,6 +145,8 @@
     const tag = $(el).prop('tagName')?.toLowerCase();
     if (!tag) return false;
     if (isBreadcrumb($, el)) return false;
+    // Exclude crafting/utility UI blocks entirely
+    if (isWithin($, el, '.crafting-recipe, .minecraft-text, .item-header, .glb-viewer, .glb-viewer-container')) return false;
     if (tag.startsWith('h')) return false;
     return tag === 'p' || tag === 'ul' || tag === 'ol';
   };
@@ -104,10 +160,16 @@
   function nodeToText($, el) {
     const tag = $(el).prop('tagName')?.toLowerCase();
     if (isBreadcrumb($, el)) return '';
+    const cls = ($(el).attr('class') || '').toLowerCase();
+    if (cls.includes('crafting-recipe-item-count')) return '';
+    if (isWithin($, el, '.crafting-recipe, .minecraft-text, .item-header, .glb-viewer, .glb-viewer-container')) return '';
     if (tag && tag.startsWith('h')) return '';
     if (tag === 'ul') return getListText($, el, false);
     if (tag === 'ol') return getListText($, el, true);
-    return $(el).text().trim();
+    const t = getInlineMarkdown($, $(el)).trim();
+    if (STAT_PREFIX_RE.test(t)) return '';
+    if (/^\d+$/.test(t)) return '';
+    return t;
   };
 
   /**
@@ -203,6 +265,163 @@
     return fragment ? `${baseUrl}#${fragment}` : baseUrl;
   };
 
+  /** Default TTL for cached search index (ms). */
+  const INDEX_TTL_MS = 10 * 60 * 1000;
+  /** @type {Array<{ entry: string, content?: string, url: string }>|null} */
+  let _cachedIndex = null;
+  let _cachedIndexAt = 0;
+
+  /**
+   * Builds the search index URL from BASE or uses an override.
+   * * Thank you Yan :3
+   * @param {string|undefined} override URL to search_index.json
+   * @returns {string}
+   */
+  function buildSearchIndexUrl(override) {
+    if (override) return override;
+    const envOverride = process.env.SEARCH_INDEX_URL;
+    if (envOverride) return envOverride;
+    return BASE.endsWith('/') ? `${BASE}search_index.json` : `${BASE}/search_index.json`;
+  };
+
+  /**
+   * Fetches and caches the search index.
+   * @param {string|undefined} override URL to search_index.json
+   * @returns {Promise<Array<{ entry: string, content?: string, url: string }>>}
+   */
+  async function fetchSearchIndex(override) {
+    const now = Date.now();
+    if (_cachedIndex && (now - _cachedIndexAt) < INDEX_TTL_MS) return _cachedIndex;
+    const url = buildSearchIndexUrl(override);
+    const res = await axios.get(url, { headers: { 'Cache-Control': 'no-cache' }, timeout: 15000 });
+    if (!Array.isArray(res.data)) throw new Error('Invalid search_index.json format');
+    _cachedIndex = res.data;
+    _cachedIndexAt = now;
+    return _cachedIndex;
+  };
+
+  /**
+   * Sets a query string into lowercase terms.
+   * @param {string} q
+   * @returns {string[]}
+   */
+  function tokenize(q) {
+    return (q || '')
+      .toLowerCase()
+      .replace(/[_#./-]+/g, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  };
+
+  /**
+   * Escapes a string.
+   * @param {string} s
+   * @returns {string}
+   */
+  function escapeForRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+
+  /**
+   * Checks if a term appears as a standalone word in text.
+   * Word boundaries are defined by transitions.
+   * @param {string} text
+   * @param {string} term
+   * @returns {boolean}
+   */
+  function hasStandaloneTerm(text, term) {
+    if (!text || !term) return false;
+    const esc = escapeForRegex(term);
+    // regex moment.
+    const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}(?:[^\\p{L}\\p{N}]|$)`, 'iu');
+    return re.test(text);
+  };
+
+  /**
+   * Checks if haystack contains needle. (real terms btw).
+   * @param {string} hay
+   * @param {string} needle
+   * @returns {boolean}
+   */
+  function normalizedHasToken(hay, needle) {
+    const h = normalizeId(hay);
+    const n = normalizeId(needle);
+    if (!n) return false;
+    const re = new RegExp(`(?:^|_)${escapeForRegex(n)}(?:_|$)`);
+    return re.test(h);
+  };
+
+  /**
+   * Compares a search index row against query terms.
+   * @param {{ entry: string, content?: string }} entry
+   * @param {string[]} terms
+   * @returns {number}
+   */
+  function scoreEntry(entry, terms) {
+    const title = (entry.entry || '');
+    const content = (entry.content || '');
+    let score = 0;
+    for (const t of terms) {
+      if (hasStandaloneTerm(title, t)) score += 4;
+      if (hasStandaloneTerm(content, t)) score += 2;
+    };
+    for (const t of terms) {
+      const esc = escapeForRegex(t);
+      const reStart = new RegExp(`^(?:${esc})(?:[^\\p{L}\\p{N}]|$)`, 'iu');
+      if (reStart.test(title)) score += 1;
+    };
+    return score;
+  };
+
+  /**
+   * Searches the JSON index and returns matches as URLs with titles.
+   * @param {string} query
+   * @param {{ searchIndexUrl?: string, limit?: number }} [opts]
+   * @returns {Promise<Array<{ title: string, url: string }>>}
+   */
+  async function searchGuideViaIndex(query, opts) {
+    const terms = tokenize(query);
+    if (!terms.length) return [];
+    const idx = await fetchSearchIndex(opts?.searchIndexUrl);
+    const scored = [];
+    for (const e of idx) {
+      const s = scoreEntry(e, terms);
+      if (s > 0) scored.push({ s, title: e.entry || 'Field Guide', url: e.url });
+    };
+    scored.sort((a, b) => b.s - a.s);
+
+    const seen = new Set();
+    const top = [];
+    const cap = Math.max(1, Math.min(opts?.limit ?? 250, 500));
+    for (const r of scored) {
+      const abs = buildUrlFromPath(r.url);
+      if (!seen.has(abs)) {
+        seen.add(abs);
+        top.push({ title: r.title, url: abs });
+      };
+      if (top.length >= cap) break;
+    };
+    return top;
+  };
+
+  /**
+   * Try JSON index first then fallback to BFS search.
+   * @param {string} query
+   * @param {{ searchIndexUrl?: string, limit?: number }} [opts]
+   * @returns {Promise<Array<{ title: string, url: string }>>}
+   */
+  async function searchGuideFast(query, opts) {
+    try {
+      const viaIndex = await searchGuideViaIndex(query, opts);
+      if (viaIndex.length) return viaIndex;
+    } catch {}
+    const limit = opts?.limit ?? 25;
+    const fallback = await searchGuideNormalizedNoCache(query, 800, limit);
+    return fallback;
+  };
+
   /**
    * Fetches HTML content for a given URL.
    * @param {string} url - The page URL.
@@ -260,15 +479,21 @@
     const root = $('.col-md-9');
     const scope = root.length ? root : $.root();
     const blocks = [];
+    let currentLen = 0;
+    const sepLen = 2;
     scope.find('p, ul, ol').each((i, el) => {
       const t = nodeToText($, el);
       if (!t) return;
-      if (/^Rarity:|^Density:|^Type:|^Y:\s|^Size:|^Height:|^Indicator Max Depth:|^Stone Types:/i.test(t)) return;
+      if (STAT_PREFIX_RE.test(t)) return;
+      const addLen = (blocks.length ? sepLen : 0) + t.length;
+      if (currentLen + addLen > EMBED_DESC_LIMIT) {
+        return false;
+      };
       blocks.push(t);
-      if (blocks.length >= 3) return false;
+      currentLen += addLen;
     });
     const text = blocks.join('\n\n');
-    return truncateWithEllipsis(text, 1200);
+    return truncateWithEllipsis(text, EMBED_DESC_LIMIT);
   };
 
   /**
@@ -299,6 +524,16 @@
       const contentRoot = el.closest('.col-md-9');
       if (contentRoot && contentRoot.length && contentRoot.find(cursor).length === 0) break;
       if (isBreadcrumb($, cursor)) break;
+      const tagC = cursor.prop('tagName')?.toLowerCase();
+      if (tagC && tagC.startsWith('h')) {
+        const lvl = parseInt(tagC.slice(1), 10) || 6;
+        if (!level || lvl > level) {
+          const text = cursor.text().trim();
+          if (text) parts.push(`**${text}**`);
+        }
+        cursor = cursor.next();
+        continue;
+      }
       if (!shouldIncludeNode($, cursor)) {
         cursor = cursor.next();
         continue;
@@ -399,15 +634,22 @@
 
     const toc = buildToc($, baseUrl, title);
     const tocLines = toc.map(it => `- [${it.title}](${it.url})`);
-    // Do not repeat the page title in the description. The embed title already shows it.
-    const combined = [description || '', '', ...tocLines]
+    const baseText = (description || '').trim();
+    const baseLen = baseText.length;
+    const remaining = Math.max(0, EMBED_DESC_LIMIT - (baseLen ? baseLen + 2 : 0));
+    const pickedToc = [];
+    let used = 0;
+    for (const line of tocLines) {
+      const add = (pickedToc.length ? 1 : 0) + line.length + 1;
+      if (used + add > remaining) break;
+      pickedToc.push(line);
+      used += add;
+    };
+    const combined = [baseText, pickedToc.length ? '' : null, ...pickedToc]
       .filter(Boolean)
       .join('\n')
       .trim();
-    const finalDesc = truncateWithEllipsis(combined, EMBED_DESC_LIMIT);
-    const withEllipsis = toc.length > 0 && !finalDesc.endsWith('...')
-      ? truncateWithEllipsis(finalDesc + '...', EMBED_DESC_LIMIT)
-      : finalDesc;
+    const withEllipsis = truncateWithEllipsis(combined, EMBED_DESC_LIMIT);
 
     const embed = new EmbedBuilder()
       .setTitle(title)
@@ -452,12 +694,8 @@
       const segments = pathPart.split('/').filter(Boolean);
       const filename = segments.length ? segments[segments.length - 1] : pathPart;
       const base = filename.replace(/\.html$/i, '');
-      const baseNorm = normalizeId(base);
-      if (baseNorm.includes(norm)) return true;
-      if (frag) {
-        const fragNorm = normalizeId(frag);
-        if (fragNorm.includes(norm)) return true;
-      };
+      if (normalizedHasToken(base, norm)) return true;
+      if (frag && normalizedHasToken(frag, norm)) return true;
       return false;
     } catch {
       return false;
@@ -547,9 +785,8 @@
 
       const sections = await parseSectionsNoCache(current);
       for (const s of sections) {
-        const idMatch = (s.id || '').toLowerCase().includes(norm);
-        const titleNorm = normalizeId(s.title || '');
-        const titleMatch = titleNorm.includes(norm);
+        const idMatch = normalizedHasToken(s.id || '', norm);
+        const titleMatch = normalizedHasToken(s.title || '', norm);
         const relS = s.url.startsWith(BASE) ? s.url.slice(BASE.length) : s.url;
         const pathMatchStrict = filenameAndFragmentMatch(relS, norm);
         if ((idMatch || titleMatch || pathMatchStrict) && !isBlacklistedFragment(s.id) && !isBlacklistedFragment(s.url)) {
@@ -588,5 +825,7 @@
     fetchGuideEmbed,
     searchGuideDeep,
     searchGuideNormalizedNoCache,
+    searchGuideViaIndex,
+    searchGuideFast,
   };
   // Thank you for listening to my TED talk.

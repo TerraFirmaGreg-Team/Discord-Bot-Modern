@@ -8,3 +8,5 @@ package-lock.json
 WIP/
 *.xml
 *.iml
+.idea/
+dist/
