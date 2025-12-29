@@ -203,6 +203,163 @@
     return fragment ? `${baseUrl}#${fragment}` : baseUrl;
   };
 
+  /** Default TTL for cached search index (ms). */
+  const INDEX_TTL_MS = 10 * 60 * 1000;
+  /** @type {Array<{ entry: string, content?: string, url: string }>|null} */
+  let _cachedIndex = null;
+  let _cachedIndexAt = 0;
+
+  /**
+   * Builds the search index URL from BASE or uses an override.
+   * * Thank you Yan :3
+   * @param {string|undefined} override URL to search_index.json
+   * @returns {string}
+   */
+  function buildSearchIndexUrl(override) {
+    if (override) return override;
+    const envOverride = process.env.SEARCH_INDEX_URL;
+    if (envOverride) return envOverride;
+    return BASE.endsWith('/') ? `${BASE}search_index.json` : `${BASE}/search_index.json`;
+  };
+
+  /**
+   * Fetches and caches the search index.
+   * @param {string|undefined} override URL to search_index.json
+   * @returns {Promise<Array<{ entry: string, content?: string, url: string }>>}
+   */
+  async function fetchSearchIndex(override) {
+    const now = Date.now();
+    if (_cachedIndex && (now - _cachedIndexAt) < INDEX_TTL_MS) return _cachedIndex;
+    const url = buildSearchIndexUrl(override);
+    const res = await axios.get(url, { headers: { 'Cache-Control': 'no-cache' }, timeout: 15000 });
+    if (!Array.isArray(res.data)) throw new Error('Invalid search_index.json format');
+    _cachedIndex = res.data;
+    _cachedIndexAt = now;
+    return _cachedIndex;
+  };
+
+  /**
+   * Sets a query string into lowercase terms.
+   * @param {string} q
+   * @returns {string[]}
+   */
+  function tokenize(q) {
+    return (q || '')
+      .toLowerCase()
+      .replace(/[_#./-]+/g, ' ')
+      .replace(/[^\p{L}\p{N}\s]/gu, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  };
+
+  /**
+   * Escapes a string.
+   * @param {string} s
+   * @returns {string}
+   */
+  function escapeForRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  };
+
+  /**
+   * Checks if a term appears as a standalone word in text.
+   * Word boundaries are defined by transitions.
+   * @param {string} text
+   * @param {string} term
+   * @returns {boolean}
+   */
+  function hasStandaloneTerm(text, term) {
+    if (!text || !term) return false;
+    const esc = escapeForRegex(term);
+    // regex moment.
+    const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}(?:[^\\p{L}\\p{N}]|$)`, 'iu');
+    return re.test(text);
+  };
+
+  /**
+   * Checks if haystack contains needle. (real terms btw).
+   * @param {string} hay
+   * @param {string} needle
+   * @returns {boolean}
+   */
+  function normalizedHasToken(hay, needle) {
+    const h = normalizeId(hay);
+    const n = normalizeId(needle);
+    if (!n) return false;
+    const re = new RegExp(`(?:^|_)${escapeForRegex(n)}(?:_|$)`);
+    return re.test(h);
+  };
+
+  /**
+   * Compares a search index row against query terms.
+   * @param {{ entry: string, content?: string }} entry
+   * @param {string[]} terms
+   * @returns {number}
+   */
+  function scoreEntry(entry, terms) {
+    const title = (entry.entry || '');
+    const content = (entry.content || '');
+    let score = 0;
+    for (const t of terms) {
+      if (hasStandaloneTerm(title, t)) score += 4;
+      if (hasStandaloneTerm(content, t)) score += 2;
+    };
+    for (const t of terms) {
+      const esc = escapeForRegex(t);
+      const reStart = new RegExp(`^(?:${esc})(?:[^\\p{L}\\p{N}]|$)`, 'iu');
+      if (reStart.test(title)) score += 1;
+    };
+    return score;
+  };
+
+  /**
+   * Searches the JSON index and returns matches as URLs with titles.
+   * @param {string} query
+   * @param {{ searchIndexUrl?: string, limit?: number }} [opts]
+   * @returns {Promise<Array<{ title: string, url: string }>>}
+   */
+  async function searchGuideViaIndex(query, opts) {
+    const terms = tokenize(query);
+    if (!terms.length) return [];
+    const idx = await fetchSearchIndex(opts?.searchIndexUrl);
+    const scored = [];
+    for (const e of idx) {
+      const s = scoreEntry(e, terms);
+      if (s > 0) scored.push({ s, title: e.entry || 'Field Guide', url: e.url });
+    };
+    scored.sort((a, b) => b.s - a.s);
+
+    const seen = new Set();
+    const top = [];
+    const cap = Math.max(1, Math.min(opts?.limit ?? 250, 500));
+    for (const r of scored) {
+      const abs = buildUrlFromPath(r.url);
+      if (!seen.has(abs)) {
+        seen.add(abs);
+        top.push({ title: r.title, url: abs });
+      };
+      if (top.length >= cap) break;
+    };
+    return top;
+  };
+
+  /**
+   * Try JSON index first then fallback to BFS search.
+   * @param {string} query
+   * @param {{ searchIndexUrl?: string, limit?: number }} [opts]
+   * @returns {Promise<Array<{ title: string, url: string }>>}
+   */
+  async function searchGuideFast(query, opts) {
+    try {
+      const viaIndex = await searchGuideViaIndex(query, opts);
+      if (viaIndex.length) return viaIndex;
+    } catch {}
+    const limit = opts?.limit ?? 25;
+    const fallback = await searchGuideNormalizedNoCache(query, 800, limit);
+    return fallback;
+  };
+
   /**
    * Fetches HTML content for a given URL.
    * @param {string} url - The page URL.
@@ -452,12 +609,8 @@
       const segments = pathPart.split('/').filter(Boolean);
       const filename = segments.length ? segments[segments.length - 1] : pathPart;
       const base = filename.replace(/\.html$/i, '');
-      const baseNorm = normalizeId(base);
-      if (baseNorm.includes(norm)) return true;
-      if (frag) {
-        const fragNorm = normalizeId(frag);
-        if (fragNorm.includes(norm)) return true;
-      };
+      if (normalizedHasToken(base, norm)) return true;
+      if (frag && normalizedHasToken(frag, norm)) return true;
       return false;
     } catch {
       return false;
@@ -547,9 +700,8 @@
 
       const sections = await parseSectionsNoCache(current);
       for (const s of sections) {
-        const idMatch = (s.id || '').toLowerCase().includes(norm);
-        const titleNorm = normalizeId(s.title || '');
-        const titleMatch = titleNorm.includes(norm);
+        const idMatch = normalizedHasToken(s.id || '', norm);
+        const titleMatch = normalizedHasToken(s.title || '', norm);
         const relS = s.url.startsWith(BASE) ? s.url.slice(BASE.length) : s.url;
         const pathMatchStrict = filenameAndFragmentMatch(relS, norm);
         if ((idMatch || titleMatch || pathMatchStrict) && !isBlacklistedFragment(s.id) && !isBlacklistedFragment(s.url)) {
@@ -588,5 +740,7 @@
     fetchGuideEmbed,
     searchGuideDeep,
     searchGuideNormalizedNoCache,
+    searchGuideViaIndex,
+    searchGuideFast,
   };
   // Thank you for listening to my TED talk.

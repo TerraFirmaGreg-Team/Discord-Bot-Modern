@@ -32,7 +32,7 @@ const commands = [
     .setDescription('Top Field Guide links'),
   new SlashCommandBuilder()
     .setName('fgsearch')
-    .setDescription('Search the guide (matches page titles and section headings)')
+    .setDescription('Search the guide!')
     .addStringOption(opt =>
       opt.setName('query')
         .setDescription('Example: "climate"')
