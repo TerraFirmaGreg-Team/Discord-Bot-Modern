@@ -1,8 +1,9 @@
-const DEV_MODE = false; // set to true to enable terminal logging
+const DEV_MODE = false; // set to true to enable terminal logging and guild based command registration
+module.exports = { DEV_MODE };
 
   const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
   const dotenv = require('dotenv');
-  const { BASE, fetchGuideEmbed, searchGuideFast } = require('./scraper');
+  const { BASE, DEFAULT_LANG, LANGS, fetchGuideEmbed, searchGuideFast, fetchPageTitle } = require('./scraper');
   const crypto = require('crypto');
   const searchSessions = new Map();
 
@@ -64,14 +65,15 @@ const DEV_MODE = false; // set to true to enable terminal logging
     return [row1, row2];
   }
 
-  dotenv.config();
+  if (require.main === module) {
+    dotenv.config();
 
-  const client = new Client({
-    intents: [
-      GatewayIntentBits.Guilds
-    ],
-    partials: [Partials.Channel]
-  });
+    const client = new Client({
+      intents: [
+        GatewayIntentBits.Guilds
+      ],
+      partials: [Partials.Channel]
+    });
 
   if (DEV_MODE){ 
   // Log IDs during testing.
@@ -113,9 +115,11 @@ const DEV_MODE = false; // set to true to enable terminal logging
       // `/fgpath`: fetch and display a guide page by the url path given.
       if (interaction.commandName === 'fgpath') {
         const path = interaction.options.getString('path', true);
+        const langOpt = interaction.options.getString('language') || DEFAULT_LANG;
+        const selectedLang = LANGS.includes(langOpt) ? langOpt : DEFAULT_LANG;
         await interaction.reply({ content: 'Working on it...', flags: 64 });
         try {
-          const embed = await fetchGuideEmbed(path);
+          const embed = await fetchGuideEmbed(path, selectedLang);
           const shareRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('fg-share').setLabel('Share link').setStyle(ButtonStyle.Primary)
           );
@@ -130,20 +134,25 @@ const DEV_MODE = false; // set to true to enable terminal logging
       if (interaction.commandName === 'fgtop') {
         await interaction.reply({ content: 'Choose a link…', flags: 64 });
         try {
-          // I know emojis look AI generated here but I picked them myself for fast visual identification :3
-          // Unfortunately Discord embeds dont seem to support custom emojis in select menus.
-          const links = [
-            { label: '📙 Online Field Guide', value: `${BASE}` },
-            { label: '⛏️ Ore Glossary', value: `${BASE}tfg_ores.html` },
-            { label: '🌎 TFC Geology', value: `${BASE}the_world/geology.html` },
-            { label: '🐖 Animals', value: `${BASE}mechanics/animal_husbandry.html` },
-            { label: '🌾 Crops', value: `${BASE}mechanics/crops.html` },
-            { label: '🍕 Firmalife', value: `${BASE}firmalife.html` },
-            { label: '🛣️ Roads & Roofs', value: `${BASE}roadsandroofs.html` },
-            { label: '⛵ FirmaCiv', value: `${BASE}firmaciv.html` },
-            { label: '💡 TFG Tips', value: `${BASE}tfg_tips.html` },
+          const langOpt = interaction.options.getString('language') || DEFAULT_LANG;
+          const selectedLang = LANGS.includes(langOpt) ? langOpt : DEFAULT_LANG;
+          const langBase = `${BASE}${selectedLang}/`;
+          const targets = [
+            { emoji: '📙', url: `${langBase}` },
+            { emoji: '⛏️', url: `${langBase}tfg_ores.html` },
+            { emoji: '🌎', url: `${langBase}the_world/geology.html` },
+            { emoji: '🐖', url: `${langBase}mechanics/animal_husbandry.html` },
+            { emoji: '🌾', url: `${langBase}mechanics/crops.html` },
+            { emoji: '🍕', url: `${langBase}firmalife.html` },
+            { emoji: '🛣️', url: `${langBase}roadsandroofs.html` },
+            { emoji: '⛵', url: `${langBase}firmaciv.html` },
+            { emoji: '💡', url: `${langBase}tfg_tips.html` },
           ];
-          const options = links.map(o => ({ label: o.label.slice(0, 100), value: o.value }));
+          const results = await Promise.all(targets.map(t => fetchPageTitle(t.url, selectedLang).then(r => ({...t, title: r.title, url: r.url})).catch(() => ({...t, title: null}))))
+          const options = results.map(r => {
+            const labelText = r.title ? `${r.emoji} ${r.title}` : `${r.emoji} ${r.url}`;
+            return { label: labelText.slice(0, 100), value: r.url };
+          });
           const select = new StringSelectMenuBuilder()
             .setCustomId('fgtop-select')
             .setPlaceholder('Select a link')
@@ -159,10 +168,12 @@ const DEV_MODE = false; // set to true to enable terminal logging
       // `/fgsearch`: search the guide for pages and sections matching query keywords. Like a browser.
       if (interaction.commandName === 'fgsearch') {
         const query = interaction.options.getString('query', true);
+        const langOpt = interaction.options.getString('language') || DEFAULT_LANG;
+        const selectedLang = LANGS.includes(langOpt) ? langOpt : DEFAULT_LANG;
         await interaction.reply({ content: `Searching for "${query}"...`, flags: 64 });
         try {
           // Prefer JSON index search.
-          let results = await searchGuideFast(query, { limit: 250 });
+          let results = await searchGuideFast(query, { selectedLang, limit: 250 });
           DEV_MODE && console.log(`[FieldGuideBot] fgsearch (fast) query="${query}" results=${results.length}`);
           if (!results.length) return interaction.editReply({ content: `No results for "${query}".` });
 
@@ -195,7 +206,10 @@ const DEV_MODE = false; // set to true to enable terminal logging
         if (!rel) return interaction.update({ content: 'No selection received.', components: [] });
         const url = rel.startsWith('http') ? rel : `${BASE}${rel}`;
         try {
-          const embed = await fetchGuideEmbed(url);
+          const langPattern = LANGS.join('|');
+          const match = url.match(new RegExp(`Field-Guide(?:-Modern)?/(${langPattern})/`));
+          const selectedLang = match ? match[1] : DEFAULT_LANG;
+          const embed = await fetchGuideEmbed(url, selectedLang);
           const shareRow = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('fg-share').setLabel('Share link').setStyle(ButtonStyle.Primary)
           );
@@ -267,7 +281,10 @@ const DEV_MODE = false; // set to true to enable terminal logging
       const sel = interaction.values?.[0];
       if (!sel) return interaction.update({ content: 'No selection received.', components: [] });
       try {
-        const embed = await fetchGuideEmbed(sel);
+        const langPattern = LANGS.join('|');
+        const match = sel.match(new RegExp(`Field-Guide(?:-Modern)?/(${langPattern})/`));
+        const selectedLang = match ? match[1] : DEFAULT_LANG;
+        const embed = await fetchGuideEmbed(sel, selectedLang);
         const shareRow = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId('fg-share').setLabel('Share link').setStyle(ButtonStyle.Primary)
         );
@@ -281,9 +298,10 @@ const DEV_MODE = false; // set to true to enable terminal logging
     }
   });
 
-  const token = process.env.DISCORD_TOKEN;
-  if (!token) {
-    DEV_MODE && console.error('Missing DISCORD_TOKEN in environment. Create a .env file.');
-    process.exit(1);
+    const token = process.env.DISCORD_TOKEN;
+    if (!token) {
+      DEV_MODE && console.error('Missing DISCORD_TOKEN in environment. Create a .env file.');
+      process.exit(1);
+    }
+    client.login(token);
   }
-  client.login(token);
