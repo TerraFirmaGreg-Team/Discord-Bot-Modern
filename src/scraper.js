@@ -2,8 +2,11 @@
   const axios = require('axios');
   const cheerio = require('cheerio');
   const { EmbedBuilder } = require('discord.js');
+  const { DEFAULT_LANG, LANGS } = require('./locales');
 
-  const BASE = 'https://terrafirmagreg-team.github.io/Field-Guide-Modern/en_us/';
+// const BASE = 'https://terrafirmacraft.github.io/Field-Guide/';
+ const BASE = 'https://terrafirmagreg-team.github.io/Field-Guide-Modern/';
+
   const EMBED_DESC_LIMIT = 4096;
   // Lines starting with these labels are considered metadata and excluded from embeds.
   const STAT_PREFIX_RE = /^(Recipe:|Multiblock:)/i;
@@ -57,10 +60,10 @@
    * @param {boolean} ordered - True for ordered list.
    * @returns {string} List items joined by newlines.
    */
-  function getListText($, listEl, ordered) {
+  function getListText($, listEl, ordered, currentUrl) {
     const lines = [];
     $(listEl).children('li').each((i, li) => {
-      const t = getInlineMarkdown($, $(li));
+      const t = getInlineMarkdown($, $(li), currentUrl);
       const clean = (t || '').trim();
       if (clean) lines.push(`${ordered ? `${i + 1}.` : '-' } ${clean}`);
     });
@@ -73,7 +76,7 @@
    * @param {import('cheerio').Cheerio<import('cheerio').Element>} el
    * @returns {string}
    */
-  function getInlineMarkdown($, el) {
+  function getInlineMarkdown($, el, currentUrl) {
     let out = '';
     const children = el.contents();
     children.each((_, child) => {
@@ -85,17 +88,45 @@
         const tag = (child.name || '').toLowerCase();
         const $c = $(child);
         if (tag === 'br') { out += '\n'; return; }
-        if (tag === 'strong' || tag === 'b') { const inner = getInlineMarkdown($, $c); out += inner ? `**${inner}**` : ''; return; };
-        if (tag === 'em' || tag === 'i') { const inner = getInlineMarkdown($, $c); out += inner ? `*${inner}*` : ''; return; };
-        if (tag === 'code' || tag === 'kbd') { const inner = getInlineMarkdown($, $c).replace(/`/g, '\u200B`'); out += inner ? `\`${inner}\`` : ''; return; };
+        if (tag === 'strong' || tag === 'b') { const inner = getInlineMarkdown($, $c, currentUrl); out += inner ? `**${inner}**` : ''; return; };
+        if (tag === 'em' || tag === 'i') { const inner = getInlineMarkdown($, $c, currentUrl); out += inner ? `*${inner}*` : ''; return; };
+        if (tag === 'code' || tag === 'kbd') { const inner = getInlineMarkdown($, $c, currentUrl).replace(/`/g, '\u200B`'); out += inner ? `\`${inner}\`` : ''; return; };
         if (tag === 'a') {
           const href = $c.attr('href') || '';
-          const text = getInlineMarkdown($, $c) || href;
-          try { const abs = href ? new URL(href, BASE).toString() : ''; out += abs ? `[${text}](${abs})` : text; }
-          catch { out += text; }
+          const text = getInlineMarkdown($, $c, currentUrl) || href;
+          try {
+            let abs = '';
+            const baseForResolve = currentUrl || BASE;
+            let langForLink = DEFAULT_LANG;
+            try {
+              const u = new URL(baseForResolve);
+              const parts = u.pathname.split('/');
+              const rootIdx = (() => {
+                const a = parts.indexOf('Field-Guide-Modern');
+                if (a !== -1) return a;
+                const b = parts.indexOf('Field-Guide');
+                return b;
+              })();
+              if (rootIdx !== -1) {
+                const maybe = parts[rootIdx + 1];
+                if (LANGS.includes(maybe)) langForLink = maybe;
+              }
+            } catch { langForLink = DEFAULT_LANG; }
+
+            if (!href) {
+              abs = '';
+            } else if (/^#/i.test(href)) {
+              abs = ensureLang(new URL(href, baseForResolve).toString(), langForLink);
+            } else if (/^https?:\/\//i.test(href)) {
+              abs = canonicalLangHtml(href, langForLink);
+            } else {
+              abs = canonicalLangHtml(new URL(href, baseForResolve).toString(), langForLink);
+            };
+            out += abs ? `[${text}](${abs})` : text;
+          } catch { out += text; };
           return;
         };
-        out += getInlineMarkdown($, $c);
+        out += getInlineMarkdown($, $c, currentUrl);
       };
     });
     return out;
@@ -157,16 +188,16 @@
    * @param {import('cheerio').Cheerio<import('cheerio').Element>} el - Element to convert.
    * @returns {string} Text content or empty string if skipped.
    */
-  function nodeToText($, el) {
+  function nodeToText($, el, currentUrl) {
     const tag = $(el).prop('tagName')?.toLowerCase();
     if (isBreadcrumb($, el)) return '';
     const cls = ($(el).attr('class') || '').toLowerCase();
     if (cls.includes('crafting-recipe-item-count')) return '';
     if (isWithin($, el, '.crafting-recipe, .minecraft-text, .item-header, .glb-viewer, .glb-viewer-container')) return '';
     if (tag && tag.startsWith('h')) return '';
-    if (tag === 'ul') return getListText($, el, false);
-    if (tag === 'ol') return getListText($, el, true);
-    const t = getInlineMarkdown($, $(el)).trim();
+    if (tag === 'ul') return getListText($, el, false, currentUrl);
+    if (tag === 'ol') return getListText($, el, true, currentUrl);
+    const t = getInlineMarkdown($, $(el), currentUrl).trim();
     if (STAT_PREFIX_RE.test(t)) return '';
     if (/^\d+$/.test(t)) return '';
     return t;
@@ -187,23 +218,31 @@
   };
 
   /**
-   * Ensures URLs contain '/en_us/' after 'Field-Guide-Modern'.
-   * * Sorry, just too slow to search multiple languages.
-   * @param {string} url - Input URL.
-   * @returns {string} URL with en_us.
+   * Ensures URLs contain the selected locale segment.
+   * @param {string} url
+   * @param {string} lang
+   * @returns {string}
    */
-  function ensureEnUs(url) {
+  function ensureLang(url, lang = DEFAULT_LANG) {
     try {
+      const safe = LANGS.includes(lang) ? lang : DEFAULT_LANG;
       const u = new URL(url);
       const parts = u.pathname.split('/');
-      const i = parts.indexOf('Field-Guide-Modern');
-      if (i !== -1) {
-        const next = parts[i + 1];
-        if (next !== 'en_us') {
-          parts.splice(i + 1, 0, 'en_us');
-          u.pathname = parts.join('/');
-        };
-      };
+      const rootIdx = (() => {
+        const a = parts.indexOf('Field-Guide-Modern');
+        if (a !== -1) return a;
+        const b = parts.indexOf('Field-Guide');
+        return b;
+      })();
+      if (rootIdx !== -1) {
+        const next = parts[rootIdx + 1];
+        if (LANGS.includes(next)) {
+          if (next !== safe) parts[rootIdx + 1] = safe;
+        } else {
+          parts.splice(rootIdx + 1, 0, safe);
+        }
+        u.pathname = parts.join('/');
+      }
       return u.toString();
     } catch {
       return url;
@@ -211,13 +250,14 @@
   };
 
   /**
-   * Produces an en_us URL (ensures index.html and removes hash).
-   * @param {string} url - Input URL.
-   * @returns {string} Output URL.
+   * Sets a URL to HTML, removes hash, and enforces selected lang.
+   * @param {string} url
+   * @param {string} lang
+   * @returns {string}
    */
-  function canonicalEnUsHtml(url) {
+  function canonicalLangHtml(url, lang = DEFAULT_LANG) {
     try {
-      const u = new URL(ensureEnUs(url));
+      const u = new URL(ensureLang(url, lang));
       u.hash = '';
       const path = u.pathname;
       const last = path.split('/').pop();
@@ -232,7 +272,7 @@
       };
       return u.toString();
     } catch {
-      return ensureEnUs(url);
+      return ensureLang(url, lang);
     };
   };
 
@@ -241,17 +281,33 @@
    * @param {string} path - Relative path or absolute URL (may include '#fragment').
    * @returns {{ baseUrl: string, fragment: string|null }} Output components.
    */
-  function parsePathAndFragment(path) {
+  function parsePathAndFragment(path, lang = DEFAULT_LANG) {
     if (/^https?:\/\//i.test(path)) {
       const u = new URL(path);
-      const baseUrl = canonicalEnUsHtml(u.toString());
+      let useLang = lang;
+      try {
+        const parts = u.pathname.split('/');
+        const rootIdx = (() => {
+          const a = parts.indexOf('Field-Guide-Modern');
+          if (a !== -1) return a;
+          const b = parts.indexOf('Field-Guide');
+          return b;
+        })();
+        if (rootIdx !== -1) {
+          const maybe = parts[rootIdx + 1];
+          if (LANGS.includes(maybe)) useLang = maybe;
+        }
+      } catch {}
+      const baseUrl = canonicalLangHtml(u.toString(), useLang);
       const fragment = u.hash ? u.hash.slice(1) : null;
       return { baseUrl, fragment };
     };
     const [p, frag] = String(path).split('#');
     const normalized = p.replace(/^\/*|\/*$/g, '');
     const endsHtml = normalized.endsWith('.html') ? normalized : `${normalized}.html`;
-    const baseUrl = canonicalEnUsHtml(`${BASE}${endsHtml}`);
+    const safeLang = LANGS.includes(lang) ? lang : DEFAULT_LANG;
+    const langBase = new URL(`${safeLang}/`, BASE).toString();
+    const baseUrl = canonicalLangHtml(new URL(endsHtml, langBase).toString(), safeLang);
     return { baseUrl, fragment: frag || null };
   };
 
@@ -260,16 +316,14 @@
    * @param {string} path - Relative path or absolute URL.
    * @returns {string} Finished URL.
    */
-  function buildUrlFromPath(path) {
-    const { baseUrl, fragment } = parsePathAndFragment(path);
+  function buildUrlFromPath(path, lang = DEFAULT_LANG) {
+    const { baseUrl, fragment } = parsePathAndFragment(path, lang);
     return fragment ? `${baseUrl}#${fragment}` : baseUrl;
   };
 
   /** Default TTL for cached search index (ms). */
   const INDEX_TTL_MS = 10 * 60 * 1000;
   /** @type {Array<{ entry: string, content?: string, url: string }>|null} */
-  let _cachedIndex = null;
-  let _cachedIndexAt = 0;
 
   /**
    * Builds the search index URL from BASE or uses an override.
@@ -277,11 +331,12 @@
    * @param {string|undefined} override URL to search_index.json
    * @returns {string}
    */
-  function buildSearchIndexUrl(override) {
+  function buildSearchIndexUrlForLang(lang, override) {
     if (override) return override;
     const envOverride = process.env.SEARCH_INDEX_URL;
     if (envOverride) return envOverride;
-    return BASE.endsWith('/') ? `${BASE}search_index.json` : `${BASE}/search_index.json`;
+    const safeLang = LANGS.includes(lang) ? lang : DEFAULT_LANG;
+    return new URL(`${safeLang}/search_index.json`, BASE).toString();
   };
 
   /**
@@ -289,15 +344,17 @@
    * @param {string|undefined} override URL to search_index.json
    * @returns {Promise<Array<{ entry: string, content?: string, url: string }>>}
    */
-  async function fetchSearchIndex(override) {
+  /** Per-language cached search indices. */
+  const _cachedIndexByLang = new Map();
+  async function fetchSearchIndexForLang(lang, override) {
     const now = Date.now();
-    if (_cachedIndex && (now - _cachedIndexAt) < INDEX_TTL_MS) return _cachedIndex;
-    const url = buildSearchIndexUrl(override);
+    const cache = _cachedIndexByLang.get(lang);
+    if (cache && (now - cache.at) < INDEX_TTL_MS) return cache.data;
+    const url = buildSearchIndexUrlForLang(lang, override);
     const res = await axios.get(url, { headers: { 'Cache-Control': 'no-cache' }, timeout: 15000 });
-    if (!Array.isArray(res.data)) throw new Error('Invalid search_index.json format');
-    _cachedIndex = res.data;
-    _cachedIndexAt = now;
-    return _cachedIndex;
+    if (!Array.isArray(res.data)) throw new Error(`Invalid search_index.json format for ${lang}`);
+    _cachedIndexByLang.set(lang, { data: res.data, at: now });
+    return res.data;
   };
 
   /**
@@ -340,20 +397,6 @@
   };
 
   /**
-   * Checks if haystack contains needle. (real terms btw).
-   * @param {string} hay
-   * @param {string} needle
-   * @returns {boolean}
-   */
-  function normalizedHasToken(hay, needle) {
-    const h = normalizeId(hay);
-    const n = normalizeId(needle);
-    if (!n) return false;
-    const re = new RegExp(`(?:^|_)${escapeForRegex(n)}(?:_|$)`);
-    return re.test(h);
-  };
-
-  /**
    * Compares a search index row against query terms.
    * @param {{ entry: string, content?: string }} entry
    * @param {string[]} terms
@@ -384,25 +427,36 @@
   async function searchGuideViaIndex(query, opts) {
     const terms = tokenize(query);
     if (!terms.length) return [];
-    const idx = await fetchSearchIndex(opts?.searchIndexUrl);
-    const scored = [];
-    for (const e of idx) {
-      const s = scoreEntry(e, terms);
-      if (s > 0) scored.push({ s, title: e.entry || 'Field Guide', url: e.url });
+    const selectedLang = (opts?.selectedLang && LANGS.includes(opts.selectedLang)) ? opts.selectedLang : DEFAULT_LANG;
+    const searchLangs = Array.isArray(opts?.searchLangs) && opts.searchLangs.length ? opts.searchLangs.filter(l => LANGS.includes(l)) : LANGS;
+
+    const combined = [];
+    for (const lang of searchLangs) {
+      let idx;
+      try {
+        idx = await fetchSearchIndexForLang(lang, opts?.searchIndexUrl);
+      } catch {
+        continue;
+      }
+      for (const e of idx) {
+        const s = scoreEntry(e, terms);
+        if (s > 0) combined.push({ s, title: e.entry || 'Field Guide', url: buildUrlFromPath(e.url, lang), lang });
+      }
     };
-    scored.sort((a, b) => b.s - a.s);
+    combined.sort((a, b) => b.s - a.s);
 
     const seen = new Set();
     const top = [];
     const cap = Math.max(1, Math.min(opts?.limit ?? 250, 500));
-    for (const r of scored) {
-      const abs = buildUrlFromPath(r.url);
+    for (const r of combined) {
+      if (r.lang !== selectedLang) continue;
+      const abs = r.url;
       if (!seen.has(abs)) {
         seen.add(abs);
         top.push({ title: r.title, url: abs });
-      };
+      }
       if (top.length >= cap) break;
-    };
+    }
     return top;
   };
 
@@ -417,9 +471,7 @@
       const viaIndex = await searchGuideViaIndex(query, opts);
       if (viaIndex.length) return viaIndex;
     } catch {}
-    const limit = opts?.limit ?? 25;
-    const fallback = await searchGuideNormalizedNoCache(query, 800, limit);
-    return fallback;
+    return [];
   };
 
   /**
@@ -462,17 +514,36 @@
   };
 
   /**
+   * Fetches a page and returns its localized title and URL.
+   * @param {string} urlOrPath - URL or relative path.
+   * @param {string} [lang=DEFAULT_LANG] - Desired language.
+   * @returns {Promise<{ title: string, url: string }>} Title and URL.
+   */
+  async function fetchPageTitle(urlOrPath, lang = DEFAULT_LANG) {
+    try {
+      const { baseUrl } = parsePathAndFragment(urlOrPath, lang);
+      const html = await fetchHtml(baseUrl);
+      const $ = cheerio.load(html);
+      const title = extractTitle($) || 'Field Guide';
+      return { title, url: baseUrl };
+    } catch {
+      const { baseUrl } = parsePathAndFragment(urlOrPath, lang);
+      return { title: 'Field Guide', url: baseUrl };
+    };
+  };
+
+  /**
    * Builds a short intro by scanning main content blocks near the title.
    * @param {import('cheerio').CheerioAPI} $ - Cheerio instance.
    * @param {string} pageTitle - The current page title.
    * @returns {string} Summary/intro text.
    */
-  function extractSummaryIntro($, pageTitle) {
+  function extractSummaryIntro($, pageTitle, currentUrl) {
     const header = $('h1, h2, h3').filter((i, el) => $(el).text().trim() === pageTitle).first();
     if (header && header.length) {
       const id = header.attr('id');
       if (id && !isBlacklistedFragment(id)) {
-        const sect = extractSection($, id);
+        const sect = extractSection($, id, currentUrl);
         if (sect && sect.description) return sect.description;
       };
     };
@@ -482,7 +553,7 @@
     let currentLen = 0;
     const sepLen = 2;
     scope.find('p, ul, ol').each((i, el) => {
-      const t = nodeToText($, el);
+      const t = nodeToText($, el, currentUrl);
       if (!t) return;
       if (STAT_PREFIX_RE.test(t)) return;
       const addLen = (blocks.length ? sepLen : 0) + t.length;
@@ -502,7 +573,7 @@
    * @param {string} fragmentId - The heading id to start from.
    * @returns {{ title: string, description: string, image: string|null }|null} Section data or null.
    */
-  function extractSection($, fragmentId) {
+  function extractSection($, fragmentId, currentUrl) {
     if (!fragmentId) return null;
     if (isBlacklistedFragment(fragmentId)) return null;
     const el = $(`#${fragmentId}`).first();
@@ -538,7 +609,7 @@
         cursor = cursor.next();
         continue;
       };
-      const txt = nodeToText($, cursor);
+      const txt = nodeToText($, cursor, currentUrl);
       if (txt) parts.push(txt);
       cursor = cursor.next();
       if (parts.join('\n\n').length > EMBED_DESC_LIMIT) break;
@@ -607,19 +678,19 @@
    * @param {string} urlOrPath - Absolute URL or relative path (may include '#fragment').
    * @returns {Promise<EmbedBuilder>} Discord embed.
    */
-  async function fetchGuideEmbed(urlOrPath) {
-    const { baseUrl, fragment } = parsePathAndFragment(urlOrPath);
+  async function fetchGuideEmbed(urlOrPath, lang = DEFAULT_LANG) {
+    const { baseUrl, fragment } = parsePathAndFragment(urlOrPath, lang);
     const html = await fetchHtml(baseUrl);
     const $ = cheerio.load(html);
 
     const title = extractTitle($);
     let description = fragment
       ? null
-      : extractSummaryIntro($, title);
+      : extractSummaryIntro($, title, baseUrl);
     let image = extractFirstImage($);
 
     if (fragment) {
-      const sect = extractSection($, fragment);
+      const sect = extractSection($, fragment, baseUrl);
       if (sect) {
         const embed = new EmbedBuilder()
           .setTitle(`${sect.title} — ${title}`)
@@ -661,170 +732,13 @@
     return embed;
   };
 
-  /**
-   * Collects internal links under the en_us base from a page.
-   * @param {string} currentHtml - HTML content of the current page.
-   * @param {string} currentUrl - URL used to resolve relative links.
-   * @returns {string[]} Internal links without fragments.
-   */
-  function collectLinksEnUs(currentHtml, currentUrl) {
-    const $ = cheerio.load(currentHtml);
-    const links = [];
-    $('a[href]').each((i, el) => {
-      const href = $(el).attr('href');
-      if (!href) return;
-      if (href.startsWith('#')) return;
-      const resolved = href.startsWith('http') ? href : new URL(href, currentUrl).toString();
-      if (!resolved.startsWith(BASE)) return;
-      const noFrag = resolved.split('#')[0];
-      links.push(canonicalEnUsHtml(noFrag));
-    });
-    return Array.from(new Set(links));
-  };
-
-  /**
-   * Tests if a relative path or fragment loosely matches a query.
-   * @param {string} relPath - Path relative to base (may include '#fragment').
-   * @param {string} norm - Query string.
-   * @returns {boolean} True if the filename or fragment contains the query.
-   */
-  function filenameAndFragmentMatch(relPath, norm) {
-    try {
-      const [pathPart, frag] = relPath.split('#');
-      const segments = pathPart.split('/').filter(Boolean);
-      const filename = segments.length ? segments[segments.length - 1] : pathPart;
-      const base = filename.replace(/\.html$/i, '');
-      if (normalizedHasToken(base, norm)) return true;
-      if (frag && normalizedHasToken(frag, norm)) return true;
-      return false;
-    } catch {
-      return false;
-    };
-  };
-
-  /**
-   * Parses all headings and anchors from a page into section entries.
-   * @param {string} url - Page URL.
-   * @returns {Promise<Array<{ id: string, title: string, url: string }>>} Sections found.
-   */
-  async function parseSectionsNoCache(url) {
-    const normalizedUrl = canonicalEnUsHtml(url);
-    try {
-      const html = await fetchHtml(normalizedUrl);
-      const $ = cheerio.load(html);
-      const seen = new Set();
-      const sections = [];
-      $('h1, h2, h3, h4, h5, h6').each((i, el) => {
-        const id = $(el).attr('id');
-        const txt = $(el).text().trim();
-        if (id && txt && !seen.has(id) && !isBlacklistedFragment(id)) {
-          seen.add(id);
-          sections.push({ id, title: txt, url: `${normalizedUrl}#${id}` });
-        };
-      });
-      $('a[href^="#"]').each((i, el) => {
-        const href = $(el).attr('href');
-        const id = (href || '').slice(1);
-        const txt = $(el).text().trim();
-        if (id && txt && !seen.has(id) && !isBlacklistedFragment(id)) {
-          seen.add(id);
-          sections.push({ id, title: txt, url: `${normalizedUrl}#${id}` });
-        };
-      });
-      $('[id]').each((i, el) => {
-        const id = $(el).attr('id');
-        if (!id || seen.has(id) || isBlacklistedFragment(id)) return;
-        const txt = $(el).text().trim();
-        if (txt && txt.length >= 2) {
-          seen.add(id);
-          sections.push({ id, title: txt.slice(0, 120), url: `${normalizedUrl}#${id}` });
-        };
-      });
-      return sections;
-    } catch {
-      return [];
-    };
-  };
-
-  /**
-   * Performs a crawl across pages and sections, matching against the query.
-   * @param {string} query - Search text.
-   * @param {number} [maxPages=800] - Max pages to scan.
-   * @param {number} [limit=25] - Max matches to return.
-   * @returns {Promise<Array<{ title: string, url: string }>>} Matched results.
-   */
-  async function searchGuideNormalizedNoCache(query, maxPages = 800, limit = 25) {
-    const norm = normalizeId(query);
-    const seen = new Set();
-    const matches = [];
-
-    const queue = [
-      BASE,
-      canonicalEnUsHtml(`${BASE}tfg_ores.html`),
-      canonicalEnUsHtml(`${BASE}tfg_ores/earth_ore_index.html`),
-      canonicalEnUsHtml(`${BASE}tfg_ores/earth_vein_index.html`),
-    ];
-    const visited = new Set(queue);
-    let scanned = 0;
-
-    while (queue.length && scanned < maxPages && matches.length < limit) {
-      const current = queue.shift();
-      let html;
-      try {
-        html = await fetchHtml(current);
-      } catch {
-        continue;
-      };
-      scanned++;
-
-      const rel = current.startsWith(BASE) ? current.slice(BASE.length) : current;
-      if (filenameAndFragmentMatch(rel, norm) && !seen.has(current)) {
-        matches.push({ title: current, url: current });
-        seen.add(current);
-      };
-
-      const sections = await parseSectionsNoCache(current);
-      for (const s of sections) {
-        const idMatch = normalizedHasToken(s.id || '', norm);
-        const titleMatch = normalizedHasToken(s.title || '', norm);
-        const relS = s.url.startsWith(BASE) ? s.url.slice(BASE.length) : s.url;
-        const pathMatchStrict = filenameAndFragmentMatch(relS, norm);
-        if ((idMatch || titleMatch || pathMatchStrict) && !isBlacklistedFragment(s.id) && !isBlacklistedFragment(s.url)) {
-          if (!seen.has(s.url)) {
-            matches.push({ title: s.title, url: s.url });
-            seen.add(s.url);
-            if (matches.length >= limit) break;
-          };
-        };
-      };
-
-      for (const link of collectLinksEnUs(html, current)) {
-        if (!visited.has(link)) {
-          visited.add(link);
-          queue.push(link);
-        };
-      };
-    };
-
-    return matches;
-  };
-
-  /**
-   * Search wrapper with a lower page scan cap.
-   * @param {string} query - Search text.
-   * @param {number} [maxPages=80] - Max pages to scan.
-   * @returns {Promise<Array<{ title: string, url: string }>>} Matched results.
-   */
-  async function searchGuideDeep(query, maxPages = 80) {
-    return await searchGuideNormalizedNoCache(query, maxPages, 25);
-  };
-
   module.exports = {
     BASE,
+    DEFAULT_LANG,
+    LANGS,
     buildUrlFromPath,
+    fetchPageTitle,
     fetchGuideEmbed,
-    searchGuideDeep,
-    searchGuideNormalizedNoCache,
     searchGuideViaIndex,
     searchGuideFast,
   };
