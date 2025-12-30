@@ -1,11 +1,25 @@
 const DEV_MODE = false; // set to true to enable terminal logging and guild based command registration
 module.exports = { DEV_MODE };
 
-  const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+  const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
   const dotenv = require('dotenv');
   const { BASE, DEFAULT_LANG, LANGS, fetchGuideEmbed, searchGuideFast, fetchPageTitle } = require('./scraper');
   const crypto = require('crypto');
   const searchSessions = new Map();
+  // Rate limiting per user per user.
+  const RATE_LIMIT_MS = parseInt(process.env.RATE_LIMIT_MS || '3000', 10);
+  const _rl = new Map();
+
+  function checkAndTouch(userId, key) {
+    if (!userId || !key) return 0;
+    const now = Date.now();
+    const k = `${userId}:${key}`;
+    const last = _rl.get(k) || 0;
+    const diff = now - last;
+    if (diff < RATE_LIMIT_MS) return RATE_LIMIT_MS - diff;
+    _rl.set(k, now);
+    return 0;
+  };
 
   /**
    * Builds select menu options for a page of results (25 max).
@@ -112,6 +126,12 @@ module.exports = { DEV_MODE };
   client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand?.()) return;
     try {
+      const rem = checkAndTouch(interaction.user?.id, `cmd:${interaction.commandName}`);
+      if (rem > 0) {
+        const wait = Math.ceil(rem / 1000);
+        try { return interaction.reply({ content: `Please wait ${wait}s before using /${interaction.commandName} again.`, flags: 64 }); } catch {}
+        return;
+      };
       // `/fgpath`: fetch and display a guide page by the url path given.
       if (interaction.commandName === 'fgpath') {
         const path = interaction.options.getString('path', true);
@@ -192,16 +212,37 @@ module.exports = { DEV_MODE };
           try { return interaction.editReply({ content: 'Failed to search/fetch.' }); } catch {}
         }
       }
+
+      // `/fgscare`: sends GIF then posts embed.
+      if (interaction.commandName === 'fgscare') {
+        const gifUrl = 'https://cdn.discordapp.com/attachments/1167131539046400010/1434364792507731988/newplayer.gif?ex=695486cf&is=6953354f&hm=a244ca5b649b934ae29513698012797f070c232bc9a9242aa8c215e13fd16e94&';
+        const guideUrl = new URL(`${DEFAULT_LANG}/`, BASE).toString();
+        const text = `We have an [online field guide](${guideUrl})! You can use the following commands to find answers to most of your questions:\n\n- \`/fgsearch\` Browses field guide entries for your keywords.\n- \`/fgpath\` Use a specific url path to find entries (eg. \"mechanics/animal_husbandry\").\n- \`/fgtop\` Displays a list of the most useful field guide entries.\n- \`/fgscare\` Make others read too.`;
+        try {
+          await interaction.reply({ content: gifUrl });
+          const embed = new EmbedBuilder().setDescription(text);
+          return interaction.followUp({ embeds: [embed] });
+        } catch (e) {
+          DEV_MODE && console.error('[FieldGuideBot] fgscare error:', e);
+          try { return interaction.reply({ content: 'Failed to post message.', flags: 64 }); } catch {}
+        };
+      };
     } catch (e) {
       DEV_MODE && console.error('[FieldGuideBot] Top-level handler error:', e);
       try { return interaction.reply({ content: 'Failed to fetch that page.', flags: 64 }); } catch {}
-    }
+    };
   });
 
   // Allow for sharing links with other server members with a button.
   client.on('interactionCreate', async (interaction) => {
     try {
       if (interaction.isStringSelectMenu?.() && interaction.customId === 'fgsearch-select') {
+        const rem = checkAndTouch(interaction.user?.id, `sel:${interaction.customId}`);
+        if (rem > 0) {
+          const wait = Math.ceil(rem / 1000);
+          try { return interaction.reply({ content: `Please wait ${wait}s before selecting again.`, flags: 64 }); } catch {}
+          return;
+        };
         const rel = interaction.values?.[0];
         if (!rel) return interaction.update({ content: 'No selection received.', components: [] });
         const url = rel.startsWith('http') ? rel : `${BASE}${rel}`;
@@ -230,6 +271,12 @@ module.exports = { DEV_MODE };
       if (!interaction.isButton?.()) return;
       const cid = interaction.customId || '';
       if (!cid.startsWith('fgsearch-prev:') && !cid.startsWith('fgsearch-next:')) return;
+      const rem = checkAndTouch(interaction.user?.id, `btn:${cid.split(':')[0]}`);
+      if (rem > 0) {
+        const wait = Math.ceil(rem / 1000);
+        try { return interaction.reply({ content: `Please wait ${wait}s before paging again.`, flags: 64 }); } catch {}
+        return;
+      };
       const parts = cid.split(':');
       const action = parts[0];
       const token = parts[1];
@@ -259,6 +306,12 @@ module.exports = { DEV_MODE };
     try {
       if (!interaction.isButton?.()) return;
       if (interaction.customId !== 'fg-share') return;
+      const rem = checkAndTouch(interaction.user?.id, `btn:${interaction.customId}`);
+      if (rem > 0) {
+        const wait = Math.ceil(rem / 1000);
+        try { return interaction.reply({ content: `Please wait ${wait}s before sharing again.`, flags: 64 }); } catch {}
+        return;
+      };
       const msg = interaction.message;
       const srcEmbed = msg?.embeds?.[0];
       if (!srcEmbed) {
@@ -278,6 +331,12 @@ module.exports = { DEV_MODE };
     try {
       if (!interaction.isStringSelectMenu?.()) return;
       if (interaction.customId !== 'fgtop-select') return;
+      const rem = checkAndTouch(interaction.user?.id, `sel:${interaction.customId}`);
+      if (rem > 0) {
+        const wait = Math.ceil(rem / 1000);
+        try { return interaction.reply({ content: `Please wait ${wait}s before selecting again.`, flags: 64 }); } catch {}
+        return;
+      };
       const sel = interaction.values?.[0];
       if (!sel) return interaction.update({ content: 'No selection received.', components: [] });
       try {
