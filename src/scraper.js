@@ -57,10 +57,10 @@
    * @param {boolean} ordered - True for ordered list.
    * @returns {string} List items joined by newlines.
    */
-  function getListText($, listEl, ordered) {
+  function getListText($, listEl, ordered, currentUrl) {
     const lines = [];
     $(listEl).children('li').each((i, li) => {
-      const t = getInlineMarkdown($, $(li));
+      const t = getInlineMarkdown($, $(li), currentUrl);
       const clean = (t || '').trim();
       if (clean) lines.push(`${ordered ? `${i + 1}.` : '-' } ${clean}`);
     });
@@ -73,7 +73,7 @@
    * @param {import('cheerio').Cheerio<import('cheerio').Element>} el
    * @returns {string}
    */
-  function getInlineMarkdown($, el) {
+  function getInlineMarkdown($, el, currentUrl) {
     let out = '';
     const children = el.contents();
     children.each((_, child) => {
@@ -85,17 +85,27 @@
         const tag = (child.name || '').toLowerCase();
         const $c = $(child);
         if (tag === 'br') { out += '\n'; return; }
-        if (tag === 'strong' || tag === 'b') { const inner = getInlineMarkdown($, $c); out += inner ? `**${inner}**` : ''; return; };
-        if (tag === 'em' || tag === 'i') { const inner = getInlineMarkdown($, $c); out += inner ? `*${inner}*` : ''; return; };
-        if (tag === 'code' || tag === 'kbd') { const inner = getInlineMarkdown($, $c).replace(/`/g, '\u200B`'); out += inner ? `\`${inner}\`` : ''; return; };
+        if (tag === 'strong' || tag === 'b') { const inner = getInlineMarkdown($, $c, currentUrl); out += inner ? `**${inner}**` : ''; return; };
+        if (tag === 'em' || tag === 'i') { const inner = getInlineMarkdown($, $c, currentUrl); out += inner ? `*${inner}*` : ''; return; };
+        if (tag === 'code' || tag === 'kbd') { const inner = getInlineMarkdown($, $c, currentUrl).replace(/`/g, '\u200B`'); out += inner ? `\`${inner}\`` : ''; return; };
         if (tag === 'a') {
           const href = $c.attr('href') || '';
-          const text = getInlineMarkdown($, $c) || href;
-          try { const abs = href ? new URL(href, BASE).toString() : ''; out += abs ? `[${text}](${abs})` : text; }
-          catch { out += text; }
+          const text = getInlineMarkdown($, $c, currentUrl) || href;
+          try {
+            let abs = '';
+            if (!href) {
+              abs = '';
+            } else if (/^https?:\/\//i.test(href)) {
+              abs = canonicalEnUsHtml(href);
+            } else {
+              const baseForResolve = currentUrl || BASE;
+              abs = canonicalEnUsHtml(new URL(href, baseForResolve).toString());
+            };
+            out += abs ? `[${text}](${abs})` : text;
+          } catch { out += text; };
           return;
         };
-        out += getInlineMarkdown($, $c);
+        out += getInlineMarkdown($, $c, currentUrl);
       };
     });
     return out;
@@ -157,16 +167,16 @@
    * @param {import('cheerio').Cheerio<import('cheerio').Element>} el - Element to convert.
    * @returns {string} Text content or empty string if skipped.
    */
-  function nodeToText($, el) {
+  function nodeToText($, el, currentUrl) {
     const tag = $(el).prop('tagName')?.toLowerCase();
     if (isBreadcrumb($, el)) return '';
     const cls = ($(el).attr('class') || '').toLowerCase();
     if (cls.includes('crafting-recipe-item-count')) return '';
     if (isWithin($, el, '.crafting-recipe, .minecraft-text, .item-header, .glb-viewer, .glb-viewer-container')) return '';
     if (tag && tag.startsWith('h')) return '';
-    if (tag === 'ul') return getListText($, el, false);
-    if (tag === 'ol') return getListText($, el, true);
-    const t = getInlineMarkdown($, $(el)).trim();
+    if (tag === 'ul') return getListText($, el, false, currentUrl);
+    if (tag === 'ol') return getListText($, el, true, currentUrl);
+    const t = getInlineMarkdown($, $(el), currentUrl).trim();
     if (STAT_PREFIX_RE.test(t)) return '';
     if (/^\d+$/.test(t)) return '';
     return t;
@@ -467,12 +477,12 @@
    * @param {string} pageTitle - The current page title.
    * @returns {string} Summary/intro text.
    */
-  function extractSummaryIntro($, pageTitle) {
+  function extractSummaryIntro($, pageTitle, currentUrl) {
     const header = $('h1, h2, h3').filter((i, el) => $(el).text().trim() === pageTitle).first();
     if (header && header.length) {
       const id = header.attr('id');
       if (id && !isBlacklistedFragment(id)) {
-        const sect = extractSection($, id);
+        const sect = extractSection($, id, currentUrl);
         if (sect && sect.description) return sect.description;
       };
     };
@@ -482,7 +492,7 @@
     let currentLen = 0;
     const sepLen = 2;
     scope.find('p, ul, ol').each((i, el) => {
-      const t = nodeToText($, el);
+      const t = nodeToText($, el, currentUrl);
       if (!t) return;
       if (STAT_PREFIX_RE.test(t)) return;
       const addLen = (blocks.length ? sepLen : 0) + t.length;
@@ -502,7 +512,7 @@
    * @param {string} fragmentId - The heading id to start from.
    * @returns {{ title: string, description: string, image: string|null }|null} Section data or null.
    */
-  function extractSection($, fragmentId) {
+  function extractSection($, fragmentId, currentUrl) {
     if (!fragmentId) return null;
     if (isBlacklistedFragment(fragmentId)) return null;
     const el = $(`#${fragmentId}`).first();
@@ -538,7 +548,7 @@
         cursor = cursor.next();
         continue;
       };
-      const txt = nodeToText($, cursor);
+      const txt = nodeToText($, cursor, currentUrl);
       if (txt) parts.push(txt);
       cursor = cursor.next();
       if (parts.join('\n\n').length > EMBED_DESC_LIMIT) break;
@@ -615,11 +625,11 @@
     const title = extractTitle($);
     let description = fragment
       ? null
-      : extractSummaryIntro($, title);
+      : extractSummaryIntro($, title, baseUrl);
     let image = extractFirstImage($);
 
     if (fragment) {
-      const sect = extractSection($, fragment);
+      const sect = extractSection($, fragment, baseUrl);
       if (sect) {
         const embed = new EmbedBuilder()
           .setTitle(`${sect.title} — ${title}`)
