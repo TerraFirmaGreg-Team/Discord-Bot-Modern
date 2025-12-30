@@ -24,7 +24,7 @@ const commands = [
     .setDescription('Fetch a page by URL path.')
     .addStringOption(opt =>
       opt.setName('path')
-        .setDescription('Example: "tfg_tips/blast_furnace_tips"')
+        .setDescription('Example: "mechanics/animal_husbandry"')
         .setRequired(true)
     ),
   new SlashCommandBuilder()

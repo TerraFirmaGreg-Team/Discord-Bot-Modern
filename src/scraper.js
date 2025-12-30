@@ -4,6 +4,9 @@
   const { EmbedBuilder } = require('discord.js');
 
   const BASE = 'https://terrafirmagreg-team.github.io/Field-Guide-Modern/en_us/';
+// use TFCs site instead v
+// const BASE = 'https://terrafirmacraft.github.io/Field-Guide/en_us/';
+
   const EMBED_DESC_LIMIT = 4096;
   // Lines starting with these labels are considered metadata and excluded from embeds.
   const STAT_PREFIX_RE = /^(Recipe:|Multiblock:)/i;
