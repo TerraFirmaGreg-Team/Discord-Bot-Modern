@@ -47,6 +47,9 @@ const commands = [
         .addChoices(...getLanguageChoices())
     ),
   new SlashCommandBuilder()
+    .setName('fgscare')
+    .setDescription('New player jump scare'),
+  new SlashCommandBuilder()
     .setName('fgsearch')
     .setDescription('Search the guide!')
     .addStringOption(opt =>
