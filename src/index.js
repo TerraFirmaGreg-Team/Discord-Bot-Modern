@@ -1,4 +1,4 @@
-const DEV_MODE = true; // set to true to enable terminal logging and guild based command registration
+const DEV_MODE = false; // set to true to enable terminal logging and guild based command registration
 module.exports = { DEV_MODE };
 
   const { Client, GatewayIntentBits, Partials, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
