@@ -1,12 +1,38 @@
-node_modules/
+# Build output
+target/
+
+# IDE files
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+.vscode/
+
+# env
 .env
+
+# OS files
 .DS_Store
 Thumbs.db
-package.json
-package.g.props
-package-lock.json
-WIP/
-*.xml
-*.iml
-.idea/
-dist/
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Maven
+.mvn/
+!.mvn/wrapper/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+
+# Java
+*.class
+*.jar
+!mvnw.cmd

@@ -1,47 +1,97 @@
-# TFG Field Guide Discord Bot
+# TFG Field Guide Bot
 
-A Discord bot that looks up TerraFirmaGreg Field Guide pages and posts embeds with the title, summary, and link.
+Discord bot to look up TerraFirmaGreg Field Guide pages and display embeds.
 
-## Features
+## Prerequisites
 
-- `/fgtop`: Shows a list of curated top field guide pages.
-- `/fgpath <path>`: Uses a raw path (e.g., `/fgpath tfg_ores/earth_vein_index`).
-- `/fgsearch <query>`: Searches the through entries for titles containing the `query` keyword.
+- **Java 17** or higher (download from https://adoptium.net/)
+- No Maven installation needed (wrapper included)
 
-## Setup for Forks
+## Setup
 
-1. Create a Discord bot at the Developer Portal, invite it to your server, and copy the token.
-2. In this folder, create an `.env` file and set `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`.
-
-> keep .env private.
+1. Create a `.env` file in the project root with your Discord credentials (copy from `.env.example`):
 
 ```env
-DISCORD_TOKEN="your_bot_token"
-DISCORD_CLIENT_ID="your_client_id"
+DISCORD_TOKEN=your_bot_token_here
+DISCORD_CLIENT_ID=your_client_id_here
+DISCORD_GUILD_ID=your_guild_id_here  # Optional, for DEV_MODE guild command registration
+RATE_LIMIT_MS=3000  # Optional, rate limit in milliseconds
 ```
 
-## Install & Run
+2. Build the project:
 
-```bash
-cd #directory
-npm install                # first time use
-npm run commands:register  # first time use
-npm start
+```powershell
+# Windows PowerShell (using wrapper - no Maven installation needed)
+.\mvnw.cmd clean package
+
+# Or if you have Maven installed globally
+mvn clean package
 ```
 
-Make sure your bot has the "Message Content Intent" enabled in the Developer Portal, since this bot uses message-based commands.
+## Running the Bot
 
-## Notes
+### Step 1: Register Slash Commands (one-time setup)
 
-- Global commands can take up to ~1 hour to propagate across Discord. They will appear in every server once your bot is invited.
-- Invite URL: set scopes bot and `applications.commands`. Minimal permissions to send messages and embed links.
-- `DEV_MODE` in `index.js` can be set to `true` to show extra console debug logs and to register commands through guild registration instead of globally.
+Run this once initially, or whenever you change command definitions:
 
-For example:
-https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=18432
+```powershell
+.\mvnw.cmd compile exec:java -D"exec.mainClass=com.tfg.fieldguidebot.RegisterCommands"
+```
+
+### Step 2: Run the Bot
+
+```powershell
+# Option A: Using Maven wrapper (recommended for development)
+.\mvnw.cmd compile exec:java -D"exec.mainClass=com.tfg.fieldguidebot.FieldGuideBot"
+
+# Option B: Run the JAR directly (after building with 'mvnw.cmd package')
+java -jar target\field-guide-bot-0.1.0.jar
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/fgpath` | Fetch a page by URL path (e.g., "mechanics/animal_husbandry") |
+| `/fgtop` | Display a list of the most useful field guide entries |
+| `/fgsearch` | Search the guide for pages matching your keywords |
+| `/fgscare` | New player jump scare - shows the field guide info |
+
+All commands support a `language` option to select different locales:
+- English (en_us) - default
+- 日本語 (ja_jp)
+- 한국어 (ko_kr)
+- Português (pt_br)
+- Русский (ru_ru)
+- Українська (uk_ua)
+- 简体中文 (zh_cn)
+- 香港繁體 (zh_hk)
+- 繁體中文 (zh_tw)
+
+## Development Mode
+
+Set `DEV_MODE = true` in `FieldGuideBot.java` to:
+- Enable detailed terminal logging
+- Use guild-based command registration (instant updates vs. global which can take up to an hour)
+
+## Project Structure
+
+```
+Discord-Bot-Modern/
+├── pom.xml                           # Maven build configuration
+├── mvnw.cmd                          # Maven wrapper (Windows)
+├── .env.example                      # Template for environment variables
+├── .env                              # Your environment variables (create this)
+├── src/main/java/com/tfg/fieldguidebot/
+│   ├── FieldGuideBot.java           # Main bot class with event handlers
+│   ├── Locales.java                 # Language configuration
+│   ├── RegisterCommands.java        # Slash command registration
+│   └── Scraper.java                 # Web scraper for Field Guide pages
+└── src/main/resources/
+    └── logback.xml                  # Logging configuration
+```
 
 ## License
 
-- Licensed under LGPL-3.0-or-later.
-- See [LICENSE](LICENSE) for the full license text.
-- SPDX-License-Identifier: LGPL-3.0-or-later
+MIT
+
