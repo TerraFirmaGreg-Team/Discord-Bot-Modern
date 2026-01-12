@@ -4,12 +4,12 @@ Discord bot to look up TerraFirmaGreg Field Guide pages and display embeds.
 
 ## Prerequisites
 
-- **Java 17** or higher (download from https://adoptium.net/)
-- No Maven installation needed (wrapper included)
+- **Java 17** or higher. [Download](https://adoptium.net/)
+- No Maven installation needed.
 
 ## Setup
 
-1. Create a `.env` file in the project root with your Discord credentials (copy from `.env.example`):
+1. Create a `.env` file in the project root with your Discord credentials:
 
 ```env
 DISCORD_TOKEN=your_bot_token_here
@@ -30,7 +30,7 @@ mvn clean package
 
 ## Running the Bot
 
-### Step 1: Register Slash Commands (one-time setup)
+### Step 1: Register Slash Commands
 
 Run this once initially, or whenever you change command definitions:
 
@@ -41,7 +41,7 @@ Run this once initially, or whenever you change command definitions:
 ### Step 2: Run the Bot
 
 ```powershell
-# Option A: Using Maven wrapper (recommended for development)
+# Option A: Using Maven wrapper
 .\mvnw.cmd compile exec:java -D"exec.mainClass=com.tfg.fieldguidebot.FieldGuideBot"
 
 # Option B: Run the JAR directly (after building with 'mvnw.cmd package')
@@ -80,7 +80,6 @@ Set `DEV_MODE = true` in `FieldGuideBot.java` to:
 Discord-Bot-Modern/
 ├── pom.xml                           # Maven build configuration
 ├── mvnw.cmd                          # Maven wrapper (Windows)
-├── .env.example                      # Template for environment variables
 ├── .env                              # Your environment variables (create this)
 ├── src/main/java/com/tfg/fieldguidebot/
 │   ├── FieldGuideBot.java           # Main bot class with event handlers
@@ -90,8 +89,3 @@ Discord-Bot-Modern/
 └── src/main/resources/
     └── logback.xml                  # Logging configuration
 ```
-
-## License
-
-MIT
-
