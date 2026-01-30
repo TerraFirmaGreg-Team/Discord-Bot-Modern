@@ -1,4 +1,4 @@
-package com.tfg.fieldguidebot;
+package team.terrafirmagreg.bot;
 
 import net.dv8tion.jda.api.interactions.commands.Command;
 

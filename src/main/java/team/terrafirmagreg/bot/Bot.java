@@ -1,4 +1,4 @@
-package com.tfg.fieldguidebot;
+package team.terrafirmagreg.bot;
 
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
@@ -24,9 +24,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-public class FieldGuideBot extends ListenerAdapter {
+public class Bot extends ListenerAdapter {
 
-    private static final Logger logger = LoggerFactory.getLogger(FieldGuideBot.class);
+    private static final Logger logger = LoggerFactory.getLogger(Bot.class);
 
     // set to true to enable terminal logging and guild based command registration.
     public static final boolean DEV_MODE = false;
@@ -118,13 +118,13 @@ public class FieldGuideBot extends ListenerAdapter {
         if (DEV_MODE) {
             // Log IDs during testing.
             JDA jda = event.getJDA();
-            logger.info("[FieldGuideBot] Logged in as {}", jda.getSelfUser().getAsTag());
-            logger.info("[FieldGuideBot] Bot user id: {}", jda.getSelfUser().getId());
+            logger.info("[Bot] Logged in as {}", jda.getSelfUser().getAsTag());
+            logger.info("[Bot] Bot user id: {}", jda.getSelfUser().getId());
             String envClientId = System.getenv("DISCORD_CLIENT_ID");
             if (envClientId != null) {
-                logger.info("[FieldGuideBot] Env client id: {}", envClientId);
+                logger.info("[Bot] Env client id: {}", envClientId);
                 if (!envClientId.equals(jda.getSelfUser().getId())) {
-                    logger.warn("[FieldGuideBot] WARNING: DISCORD_CLIENT_ID mismatch.");
+                    logger.warn("[Bot] WARNING: DISCORD_CLIENT_ID mismatch.");
                 }
             }
         }
@@ -135,7 +135,7 @@ public class FieldGuideBot extends ListenerAdapter {
         try {
             if (DEV_MODE) {
                 // Log all interactions during testing.
-                logger.info("[FieldGuideBot] Interaction received: command={} isChatInput=true",
+                logger.info("[Bot] Interaction received: command={} isChatInput=true",
                         event.getName());
             }
 
@@ -154,13 +154,23 @@ public class FieldGuideBot extends ListenerAdapter {
             }
 
             switch (event.getName()) {
-                case "fgpath" -> handleFgPath(event);
-                case "fgtop" -> handleFgTop(event);
-                case "fgsearch" -> handleFgSearch(event);
-                case "fgscare" -> handleFgScare(event);
+                case "guide" -> {
+                    String sub = event.getSubcommandName();
+                    if (sub == null) {
+                        event.reply("Please specify a subcommand.").setEphemeral(true).queue();
+                        return;
+                    }
+                    switch (sub) {
+                        case "path" -> handleFgPath(event);
+                        case "top" -> handleFgTop(event);
+                        case "search" -> handleFgSearch(event);
+                        case "scare" -> handleFgScare(event);
+                        default -> event.reply("Unknown subcommand.").setEphemeral(true).queue();
+                    }
+                }
             }
         } catch (Exception e) {
-            if (DEV_MODE) logger.error("[FieldGuideBot] Top-level handler error:", e);
+            if (DEV_MODE) logger.error("[Bot] Top-level handler error:", e);
             try {
                 event.reply("Failed to fetch that page.").setEphemeral(true).queue();
             } catch (Exception ignored) {}
@@ -179,7 +189,7 @@ public class FieldGuideBot extends ListenerAdapter {
                 Button shareBtn = Button.primary("fg-share", "Share link");
                 hook.editOriginalEmbeds(embed).setComponents(ActionRow.of(shareBtn)).queue();
             } catch (Exception e) {
-                if (DEV_MODE) logger.error("[FieldGuideBot] fgpath error:", e);
+                if (DEV_MODE) logger.error("[Bot] fgpath error:", e);
                 try {
                     hook.editOriginal("Failed to fetch that page.").queue();
                 } catch (Exception ignored) {}
@@ -231,7 +241,7 @@ public class FieldGuideBot extends ListenerAdapter {
                         .setComponents(ActionRow.of(select))
                         .queue();
             } catch (Exception e) {
-                if (DEV_MODE) logger.error("[FieldGuideBot] fgtop error:", e);
+                if (DEV_MODE) logger.error("[Bot] fgtop error:", e);
                 try {
                     hook.editOriginal("Failed to show top links.").queue();
                 } catch (Exception ignored) {}
@@ -249,7 +259,7 @@ public class FieldGuideBot extends ListenerAdapter {
             try {
                 // Prefer JSON index search.
                 List<Scraper.SearchResult> results = Scraper.searchGuideFast(query, selectedLang, 250);
-                if (DEV_MODE) logger.info("[FieldGuideBot] fgsearch (fast) query=\"{}\" results={}", query, results.size());
+                if (DEV_MODE) logger.info("[Bot] fgsearch (fast) query=\"{}\" results={}", query, results.size());
 
                 if (results.isEmpty()) {
                     hook.editOriginal("No results for \"" + query + "\".").queue();
@@ -272,7 +282,7 @@ public class FieldGuideBot extends ListenerAdapter {
                         .setComponents(rows)
                         .queue();
             } catch (Exception e) {
-                if (DEV_MODE) logger.error("[FieldGuideBot] fgsearch error:", e);
+                if (DEV_MODE) logger.error("[Bot] fgsearch error:", e);
                 try {
                     hook.editOriginal("Failed to search/fetch.").queue();
                 } catch (Exception ignored) {}
@@ -285,10 +295,10 @@ public class FieldGuideBot extends ListenerAdapter {
         String gifUrl = "https://cdn.discordapp.com/attachments/1167131539046400010/1434364792507731988/newplayer.gif?ex=695486cf&is=6953354f&hm=a244ca5b649b934ae29513698012797f070c232bc9a9242aa8c215e13fd16e94&";
         String guideUrl = Scraper.BASE + Locales.DEFAULT_LANG + "/";
         String text = "We have an [online field guide](" + guideUrl + ")! You can use the following commands to find answers to most of your questions:\n\n" +
-                "- `/fgsearch` Browses field guide entries for your keywords.\n" +
-                "- `/fgpath` Use a specific url path to find entries (eg. \"mechanics/animal_husbandry\").\n" +
-                "- `/fgtop` Displays a list of the most useful field guide entries.\n" +
-                "- `/fgscare` Make others read too.";
+                "- `/guide search` Browses field guide entries for your keywords.\n" +
+                "- `/guide path` Use a specific url path to find entries (eg. \"mechanics/animal_husbandry\").\n" +
+                "- `/guide top` Displays a list of the most useful field guide entries.\n" +
+                "- `/guide scare` Make others read too.";
 
         try {
             event.reply(gifUrl).queue(hook -> {
@@ -296,7 +306,7 @@ public class FieldGuideBot extends ListenerAdapter {
                 event.getHook().sendMessageEmbeds(embed).queue();
             });
         } catch (Exception e) {
-            if (DEV_MODE) logger.error("[FieldGuideBot] fgscare error:", e);
+            if (DEV_MODE) logger.error("[Bot] fgscare error:", e);
             try {
                 event.reply("Failed to post message.").setEphemeral(true).queue();
             } catch (Exception ignored) {}
@@ -313,7 +323,7 @@ public class FieldGuideBot extends ListenerAdapter {
                 handleFgTopSelect(event);
             }
         } catch (Exception e) {
-            if (DEV_MODE) logger.error("[FieldGuideBot] select handler error:", e);
+            if (DEV_MODE) logger.error("[Bot] select handler error:", e);
         }
     }
 
@@ -346,11 +356,11 @@ public class FieldGuideBot extends ListenerAdapter {
                         .setComponents(ActionRow.of(shareBtn))
                         .queue();
             } catch (Exception e) {
-                if (DEV_MODE) logger.error("[FieldGuideBot] fgsearch-select fetch error:", e);
+                if (DEV_MODE) logger.error("[Bot] fgsearch-select fetch error:", e);
                 hook.editOriginal("Failed to fetch the selected page.").setComponents().queue();
             }
         }, error -> {
-            if (DEV_MODE) logger.error("[FieldGuideBot] fgsearch-select defer error:", error);
+            if (DEV_MODE) logger.error("[Bot] fgsearch-select defer error:", error);
         });
     }
 
@@ -384,12 +394,12 @@ public class FieldGuideBot extends ListenerAdapter {
                             .setComponents(ActionRow.of(shareBtn))
                             .queue();
                 } catch (Exception e) {
-                    if (DEV_MODE) logger.error("[FieldGuideBot] fgtop-select fetch error:", e);
+                    if (DEV_MODE) logger.error("[Bot] fgtop-select fetch error:", e);
                     hook.editOriginal("Failed to fetch the selected page.").setComponents().queue();
                 }
             });
         } catch (Exception e) {
-            if (DEV_MODE) logger.error("[FieldGuideBot] fgtop-select handler error:", e);
+            if (DEV_MODE) logger.error("[Bot] fgtop-select handler error:", e);
             event.editMessage("Failed to fetch the selected page.").setComponents().queue();
         }
     }
@@ -407,7 +417,7 @@ public class FieldGuideBot extends ListenerAdapter {
                 handleShareButton(event);
             }
         } catch (Exception e) {
-            if (DEV_MODE) logger.error("[FieldGuideBot] button handler error:", e);
+            if (DEV_MODE) logger.error("[Bot] button handler error:", e);
         }
     }
 
@@ -500,13 +510,13 @@ public class FieldGuideBot extends ListenerAdapter {
         try {
             JDA jda = JDABuilder.createLight(token)
                     .enableIntents(GatewayIntent.GUILD_MESSAGES)
-                    .addEventListeners(new FieldGuideBot())
+                    .addEventListeners(new Bot())
                     .build();
 
             jda.awaitReady();
-            logger.info("[FieldGuideBot] Bot is ready!");
+            logger.info("[Bot] Bot is ready!");
         } catch (Exception e) {
-            logger.error("[FieldGuideBot] Failed to start bot:", e);
+            logger.error("[Bot] Failed to start bot:", e);
             System.exit(1);
         }
     }
