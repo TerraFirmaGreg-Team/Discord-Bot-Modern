@@ -1,4 +1,4 @@
-package com.tfg.fieldguidebot;
+package team.terrafirmagreg.bot;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;

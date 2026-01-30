@@ -23,6 +23,7 @@ RATE_LIMIT_MS=3000  # Optional, rate limit in milliseconds
 ```powershell
 # Windows PowerShell (using wrapper - no Maven installation needed)
 .\mvnw.cmd clean package
+.\mvnw.cmd dependency:copy-dependencies
 
 # Or if you have Maven installed globally
 mvn clean package
@@ -35,29 +36,29 @@ mvn clean package
 Run this once initially, or whenever you change command definitions:
 
 ```powershell
-.\mvnw.cmd compile exec:java -D"exec.mainClass=com.tfg.fieldguidebot.RegisterCommands"
+java -cp "target/classes;target/dependency/*" team.terrafirmagreg.bot.RegisterCommands
 ```
 
 ### Step 2: Run the Bot
 
 ```powershell
 # Option A: Using Maven wrapper
-.\mvnw.cmd compile exec:java -D"exec.mainClass=com.tfg.fieldguidebot.FieldGuideBot"
+.\mvnw.cmd compile exec:java -D"exec.mainClass=team.terrafirmagreg.bot.Bot"
 
 # Option B: Run the JAR directly (after building with 'mvnw.cmd package')
-java -jar target\field-guide-bot-0.1.0.jar
+java -jar target\terrafirmagreg-bot-0.1.0.jar
 ```
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `/fgpath` | Fetch a page by URL path (e.g., "mechanics/animal_husbandry") |
-| `/fgtop` | Display a list of the most useful field guide entries |
-| `/fgsearch` | Search the guide for pages matching your keywords |
-| `/fgscare` | New player jump scare - shows the field guide info |
+| Command         | Description                                                      |
+|----------------|------------------------------------------------------------------|
+| `/guide top`   | Display a list of the most useful field guide entries             |
+| `/guide search`| Search the guide for pages matching your keywords (requires query)|
+| `/guide path`  | Fetch a page by URL path (requires path argument)                |
+| `/guide scare` | New player jump scare - shows the field guide info               |
 
-All commands support a `language` option to select different locales:
+All `/guide` subcommands support a `language` option to select different locales:
 - English (en_us) - default
 - 日本語 (ja_jp)
 - 한국어 (ko_kr)
@@ -70,22 +71,7 @@ All commands support a `language` option to select different locales:
 
 ## Development Mode
 
-Set `DEV_MODE = true` in `FieldGuideBot.java` to:
+Set `DEV_MODE = true` in `Bot.java` to:
 - Enable detailed terminal logging
 - Use guild-based command registration (instant updates vs. global which can take up to an hour)
 
-## Project Structure
-
-```
-Discord-Bot-Modern/
-├── pom.xml                           # Maven build configuration
-├── mvnw.cmd                          # Maven wrapper (Windows)
-├── .env                              # Your environment variables (create this)
-├── src/main/java/com/tfg/fieldguidebot/
-│   ├── FieldGuideBot.java           # Main bot class with event handlers
-│   ├── Locales.java                 # Language configuration
-│   ├── RegisterCommands.java        # Slash command registration
-│   └── Scraper.java                 # Web scraper for Field Guide pages
-└── src/main/resources/
-    └── logback.xml                  # Logging configuration
-```

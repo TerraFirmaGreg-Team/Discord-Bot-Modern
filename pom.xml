@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.tfg</groupId>
-    <artifactId>field-guide-bot</artifactId>
+    <artifactId>terrafirmagreg-bot</artifactId>
     <version>0.1.0</version>
     <packaging>jar</packaging>
 
@@ -90,7 +90,7 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.tfg.fieldguidebot.FieldGuideBot</mainClass>
+                                    <mainClass>team.terrafirmagreg.bot.Bot</mainClass>
                                 </transformer>
                             </transformers>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
@@ -105,10 +105,9 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>3.1.1</version>
                 <configuration>
-                    <mainClass>com.tfg.fieldguidebot.FieldGuideBot</mainClass>
+                    <mainClass>team.terrafirmagreg.bot.Bot</mainClass>
                 </configuration>
             </plugin>
         </plugins>
     </build>
 </project>
-

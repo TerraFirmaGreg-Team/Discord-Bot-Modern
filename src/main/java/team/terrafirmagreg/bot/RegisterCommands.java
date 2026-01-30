@@ -1,4 +1,4 @@
-package com.tfg.fieldguidebot;
+package team.terrafirmagreg.bot;
 
 import io.github.cdimascio.dotenv.Dotenv;
 import net.dv8tion.jda.api.JDA;
@@ -7,6 +7,7 @@ import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
 import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
+import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +20,7 @@ public class RegisterCommands {
     private static final Logger logger = LoggerFactory.getLogger(RegisterCommands.class);
 
     public static void main(String[] args) {
+        System.out.println("RegisterCommands main method is running!");
         Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
 
         String clientId = dotenv.get("DISCORD_CLIENT_ID");
@@ -30,7 +32,7 @@ public class RegisterCommands {
         String guildId = dotenv.get("DISCORD_GUILD_ID");
         if (guildId == null) guildId = System.getenv("DISCORD_GUILD_ID");
 
-        boolean devMode = FieldGuideBot.DEV_MODE;
+        boolean devMode = Bot.DEV_MODE;
         String rawDev = dotenv.get("DEV_MODE");
         if (rawDev == null) rawDev = System.getenv("DEV_MODE");
 
@@ -43,27 +45,35 @@ public class RegisterCommands {
         OptionData languageOption = new OptionData(OptionType.STRING, "language", "Locale (default en_us)", false);
         Locales.getLanguageChoices().forEach(choice -> languageOption.addChoice(choice.getName(), choice.getAsString()));
 
-        // Field Guide Commands.
         List<SlashCommandData> commands = new ArrayList<>();
 
-        // Ping command for testing.
-        // commands.add(Commands.slash("ping", "Test"));
+        // Command: guide
+        SlashCommandData guideCommand = Commands.slash("guide", "Unified guide command");
 
-        commands.add(Commands.slash("fgpath", "Fetch a page by URL path.")
-                .addOption(OptionType.STRING, "path", "Example: \"mechanics/animal_husbandry\"", true)
-                .addOptions(languageOption));
+        // Guide Subcommand: top
+        SubcommandData topSubcommand = new SubcommandData("top", "Top Field Guide links")
+                .addOptions(languageOption);
 
-        commands.add(Commands.slash("fgtop", "Top Field Guide links")
-                .addOptions(languageOption));
-
-        commands.add(Commands.slash("fgscare", "New player jump scare"));
-
+        // Guide Subcommand: search
+        OptionData searchQueryOption = new OptionData(OptionType.STRING, "query", "Example: 'climate'", true);
         OptionData searchLanguageOption = new OptionData(OptionType.STRING, "language", "Locale (default en_us)", false);
         Locales.getLanguageChoices().forEach(choice -> searchLanguageOption.addChoice(choice.getName(), choice.getAsString()));
+        SubcommandData searchSubcommand = new SubcommandData("search", "Search the guide!")
+                .addOptions(searchQueryOption, searchLanguageOption);
 
-        commands.add(Commands.slash("fgsearch", "Search the guide!")
-                .addOption(OptionType.STRING, "query", "Example: \"climate\"", true)
-                .addOptions(searchLanguageOption));
+        // Guide Subcommand: path
+        OptionData pathOption = new OptionData(OptionType.STRING, "path", "Example: 'mechanics/animal_husbandry'", true);
+        OptionData pathLanguageOption = new OptionData(OptionType.STRING, "language", "Locale (default en_us)", false);
+        Locales.getLanguageChoices().forEach(choice -> pathLanguageOption.addChoice(choice.getName(), choice.getAsString()));
+        SubcommandData pathSubcommand = new SubcommandData("path", "Fetch a page by URL path.")
+                .addOptions(pathOption, pathLanguageOption);
+
+        // Guide Subcommand: scare
+        SubcommandData scareSubcommand = new SubcommandData("scare", "New player jump scare");
+
+        guideCommand.addSubcommands(topSubcommand, searchSubcommand, pathSubcommand, scareSubcommand);
+
+        commands.add(guideCommand);
 
         final String finalGuildId = guildId;
         final boolean finalDevMode = devMode;
@@ -108,4 +118,3 @@ public class RegisterCommands {
         }
     }
 }
-
