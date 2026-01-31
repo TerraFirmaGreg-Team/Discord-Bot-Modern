@@ -32,7 +32,7 @@ public class RegisterCommands {
         String guildId = dotenv.get("DISCORD_GUILD_ID");
         if (guildId == null) guildId = System.getenv("DISCORD_GUILD_ID");
 
-        boolean devMode = Bot.DEV_MODE;
+        boolean devMode = Main.DEV_MODE;
         String rawDev = dotenv.get("DEV_MODE");
         if (rawDev == null) rawDev = System.getenv("DEV_MODE");
 

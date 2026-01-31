@@ -1,0 +1,61 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version "${shadowPluginVersion}"
+}
+
+group = "${projectGroup}"
+version = "${projectVersion}"
+
+java {
+    sourceCompatibility = JavaVersion.toVersion("${javaVersion}")
+    targetCompatibility = JavaVersion.toVersion("${javaVersion}")
+}
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'dv8tion'
+        url = 'https://m2.dv8tion.net/releases'
+    }
+}
+
+dependencies {
+    // JDA - Java Discord API
+    implementation "net.dv8tion:JDA:${jdaVersion}"
+    
+    // JSoup for HTML parsing
+    implementation "org.jsoup:jsoup:${jsoupVersion}"
+    
+    // JSON parsing
+    implementation "com.google.code.gson:gson:${gsonVersion}"
+    
+    // dotenv for environment variables
+    implementation "io.github.cdimascio:dotenv-java:${dotenvVersion}"
+    
+    // SLF4J for logging
+    implementation "ch.qos.logback:logback-classic:${logbackVersion}"
+
+    compileOnly "org.projectlombok:lombok:${lombokVersion}"
+    annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+}
+
+application {
+    mainClass = 'team.terrafirmagreg.bot.Main'
+}
+
+shadowJar {
+    archiveBaseName.set('terrafirmagreg-bot')
+    archiveClassifier.set('')
+    archiveVersion.set('')
+    
+    manifest {
+        attributes 'Main-Class': 'team.terrafirmagreg.bot.Main'
+    }
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'team.terrafirmagreg.bot.Main'
+    }
+}
